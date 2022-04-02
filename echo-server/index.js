@@ -1,14 +1,11 @@
 module.exports.handler = async (event) => {
   console.log('Event: ', event);
-  let responseMessage = 'Hello, World!';
 
   return {
     statusCode: 200,
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'text/plain',
     },
-    body: JSON.stringify({
-      message: responseMessage,
-    }),
+    body: `ECHO: ${event.body}`,
   }
 }

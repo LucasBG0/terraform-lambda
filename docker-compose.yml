@@ -3,8 +3,8 @@ version: "3.8"
 services:
   localstack:
     container_name: "${LOCALSTACK_DOCKER_NAME-localstack_main}"
-    image: localstack/localstack
     network_mode: bridge
+    image: localstack/localstack:0.14.2
     ports:
       - "127.0.0.1:53:53"                # only required for Pro (DNS)
       - "127.0.0.1:53:53/udp"            # only required for Pro (DNS)
@@ -12,12 +12,18 @@ services:
       - "127.0.0.1:4510-4559:4510-4559"  # external service port range
       - "127.0.0.1:4566:4566"            # LocalStack Edge Proxy
     environment:
-      - DEBUG=${DEBUG-}
-      - DATA_DIR=${DATA_DIR-}
-      - LAMBDA_EXECUTOR=${LAMBDA_EXECUTOR-}
-      - LOCALSTACK_API_KEY=${LOCALSTACK_API_KEY-}  # only required for Pro
-      - HOST_TMP_FOLDER=${TMPDIR:-/tmp/}localstack
-      - DOCKER_HOST=unix:///var/run/docker.sock
+      - SERVICES=apigatewayv2,apigateway,iam,lambda,cloudwatch,cloudfront
+      - DEBUG=1
+      #- DATA_DIR=/tmp/localstack/data
+      - LAMBDA_EXECUTOR=local
+      #- HOST_TMP_FOLDER=${TMPDIR:-/tmp/}localstack
+      #- DOCKER_HOST=unix:///var/run/docker.sock
+      #- LAMBDA_DOCKER_NETWORK=localstack-tutorial
+      - DOCKER_SOCK=/var/run/docker.sock
     volumes:
-      - "${TMPDIR:-/tmp}/localstack:/tmp/localstack"
-      - "/var/run/docker.sock:/var/run/docker.sock"
+      - /var/run/docker.sock:/var/run/docker.sock
+      - localstack_data:/tmp/localstack/data
+
+
+volumes:
+  localstack_data:

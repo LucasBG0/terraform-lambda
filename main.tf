@@ -8,85 +8,86 @@ terraform {
 }
 
 provider "aws" {
-  access_key = "test"
-  secret_key = "test"
-  region     = "us-east-1"
+  region = var.myregion
 
-  skip_credentials_validation = true
-  skip_metadata_api_check     = true
-  skip_requesting_account_id  = true
+  # access_key = "fake"
+  # secret_key = "fake"
+  # skip_credentials_validation = true
+  # skip_metadata_api_check     = true
+  # skip_requesting_account_id  = true
 
-  endpoints {
-    apigateway   = "http://localhost:4566"
-    apigatewayv2 = "http://localhost:4566"
-    iam          = "http://localhost:4566"
-    lambda       = "http://localhost:4566"
-    cloudwatch   = "http://localhost:4566"
+  # endpoints {
+  #   apigatewayv2   = "http://localhost:4566"
+  #   apigateway     = "http://localhost:4566"
+  #   iam            = "http://localhost:4566"
+  #   lambda         = "http://localhost:4566"
+  #   cloudwatch     = "http://localhost:4566"
+  #   cloudwatchlogs = "http://localhost:4566"
+  #   cloudfront     = "http://localhost:4566"
+  # }
+}
+
+
+# API Gateway
+resource "aws_api_gateway_rest_api" "echo_server" {
+  name = "${var.stage_name}_rest_api"
+}
+
+resource "aws_api_gateway_resource" "echo_server" {
+  path_part   = "echo_server"
+  parent_id   = aws_api_gateway_rest_api.echo_server.root_resource_id
+  rest_api_id = aws_api_gateway_rest_api.echo_server.id
+}
+
+resource "aws_api_gateway_method" "echo_server" {
+  rest_api_id   = aws_api_gateway_rest_api.echo_server.id
+  resource_id   = aws_api_gateway_resource.echo_server.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "echo_server" {
+  rest_api_id             = aws_api_gateway_rest_api.echo_server.id
+  resource_id             = aws_api_gateway_resource.echo_server.id
+  http_method             = aws_api_gateway_method.echo_server.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.echo_server.invoke_arn
+}
+
+resource "aws_api_gateway_deployment" "echo_server" {
+  rest_api_id = aws_api_gateway_rest_api.echo_server.id
+
+  triggers = {
+    redeployment = sha1(jsonencode([
+      aws_api_gateway_resource.echo_server.id,
+      aws_api_gateway_method.echo_server.id,
+      aws_api_gateway_integration.echo_server.id,
+    ]))
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
-resource "aws_apigatewayv2_api" "lambda" {
-  name          = "serverless_lambda_gw"
-  protocol_type = "HTTP"
+resource "aws_api_gateway_stage" "echo_server" {
+  deployment_id = aws_api_gateway_deployment.echo_server.id
+  rest_api_id   = aws_api_gateway_rest_api.echo_server.id
+  stage_name    = var.stage_name
 }
 
-resource "aws_apigatewayv2_stage" "lambda" {
-  api_id = aws_apigatewayv2_api.lambda.id
-
-  name        = "serverless_lambda_stage"
-  auto_deploy = true
-
-  access_log_settings {
-    destination_arn = aws_cloudwatch_log_group.api_gw.arn
-
-    format = jsonencode({
-      requestId               = "$context.requestId"
-      sourceIp                = "$context.identity.sourceIp"
-      requestTime             = "$context.requestTime"
-      protocol                = "$context.protocol"
-      httpMethod              = "$context.httpMethod"
-      resourcePath            = "$context.resourcePath"
-      routeKey                = "$context.routeKey"
-      status                  = "$context.status"
-      responseLength          = "$context.responseLength"
-      integrationErrorMessage = "$context.integrationErrorMessage"
-      }
-    )
-  }
-}
-
-resource "aws_apigatewayv2_integration" "echo_server" {
-  api_id = aws_apigatewayv2_api.lambda.id
-
-  integration_uri    = aws_lambda_function.echo_server.invoke_arn
-  integration_type   = "AWS_PROXY"
-  integration_method = "POST"
-}
-
-resource "aws_apigatewayv2_route" "echo_server" {
-  api_id = aws_apigatewayv2_api.lambda.id
-
-  route_key = "GET /hello"
-  target    = "integrations/${aws_apigatewayv2_integration.echo_server.id}"
-}
-
-resource "aws_cloudwatch_log_group" "api_gw" {
-  name = "/aws/api_gw/${aws_apigatewayv2_api.lambda.name}"
-
-  retention_in_days = 30
-}
-
+# Lambda
 resource "aws_lambda_permission" "api_gw" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.echo_server.function_name
   principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_apigatewayv2_api.lambda.execution_arn}/*/*"
+  source_arn    = "${aws_api_gateway_rest_api.echo_server.execution_arn}/*/${aws_api_gateway_method.echo_server.http_method}${aws_api_gateway_resource.echo_server.path}"
 }
 
-resource "aws_iam_role" "iam_for_lambda" {
-  name = "iam_for_lambda"
+resource "aws_iam_role" "lambda" {
+  name = "service_role_lambda"
 
   assume_role_policy = <<EOF
 {
@@ -105,6 +106,11 @@ resource "aws_iam_role" "iam_for_lambda" {
 EOF
 }
 
+resource "aws_iam_role_policy_attachment" "lambda" {
+  role       = aws_iam_role.lambda.id
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
 data "archive_file" "lambda_echo_server" {
   type = "zip"
 
@@ -113,21 +119,11 @@ data "archive_file" "lambda_echo_server" {
 }
 
 resource "aws_lambda_function" "echo_server" {
-  filename      = "lambda_function_payload.zip"
-  function_name = "lambda_echo_server"
-  role          = aws_iam_role.iam_for_lambda.arn
-  handler       = "index.js"
-
-  # The filebase64sha256() function is available in Terraform 0.11.12 and later
-  # For Terraform 0.11.11 and earlier, use the base64sha256() function and the file() function:
-  # source_code_hash = "${base64sha256(file("lambda_function_payload.zip"))}"
+  filename         = "lambda_function_payload.zip"
+  function_name    = "lambda_echo_server"
+  role             = aws_iam_role.lambda.arn
+  handler          = "index.handler"
   source_code_hash = data.archive_file.lambda_echo_server.output_base64sha256
 
   runtime = "nodejs14.x"
-
-  environment {
-    variables = {
-      foo = "bar"
-    }
-  }
 }
