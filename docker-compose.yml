@@ -12,13 +12,10 @@ services:
       - "127.0.0.1:4510-4559:4510-4559"  # external service port range
       - "127.0.0.1:4566:4566"            # LocalStack Edge Proxy
     environment:
-      - SERVICES=apigatewayv2,apigateway,iam,lambda,cloudwatch,cloudfront
+      - SERVICES=apigateway,iam,lambda,cloudwatch,cloudwatchlogs
       - DEBUG=1
-      #- DATA_DIR=/tmp/localstack/data
+      - DATA_DIR=/tmp/localstack/data
       - LAMBDA_EXECUTOR=local
-      #- HOST_TMP_FOLDER=${TMPDIR:-/tmp/}localstack
-      #- DOCKER_HOST=unix:///var/run/docker.sock
-      #- LAMBDA_DOCKER_NETWORK=localstack-tutorial
       - DOCKER_SOCK=/var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

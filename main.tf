@@ -10,80 +10,57 @@ terraform {
 provider "aws" {
   region = var.myregion
 
-  # access_key = "fake"
-  # secret_key = "fake"
-  # skip_credentials_validation = true
-  # skip_metadata_api_check     = true
-  # skip_requesting_account_id  = true
+  access_key                  = "fake"
+  secret_key                  = "fake"
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_requesting_account_id  = true
 
-  # endpoints {
-  #   apigatewayv2   = "http://localhost:4566"
-  #   apigateway     = "http://localhost:4566"
-  #   iam            = "http://localhost:4566"
-  #   lambda         = "http://localhost:4566"
-  #   cloudwatch     = "http://localhost:4566"
-  #   cloudwatchlogs = "http://localhost:4566"
-  #   cloudfront     = "http://localhost:4566"
-  # }
-}
-
-
-# API Gateway
-resource "aws_api_gateway_rest_api" "echo_server" {
-  name = "${var.stage_name}_rest_api"
-}
-
-resource "aws_api_gateway_resource" "echo_server" {
-  path_part   = "echo_server"
-  parent_id   = aws_api_gateway_rest_api.echo_server.root_resource_id
-  rest_api_id = aws_api_gateway_rest_api.echo_server.id
-}
-
-resource "aws_api_gateway_method" "echo_server" {
-  rest_api_id   = aws_api_gateway_rest_api.echo_server.id
-  resource_id   = aws_api_gateway_resource.echo_server.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "echo_server" {
-  rest_api_id             = aws_api_gateway_rest_api.echo_server.id
-  resource_id             = aws_api_gateway_resource.echo_server.id
-  http_method             = aws_api_gateway_method.echo_server.http_method
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.echo_server.invoke_arn
-}
-
-resource "aws_api_gateway_deployment" "echo_server" {
-  rest_api_id = aws_api_gateway_rest_api.echo_server.id
-
-  triggers = {
-    redeployment = sha1(jsonencode([
-      aws_api_gateway_resource.echo_server.id,
-      aws_api_gateway_method.echo_server.id,
-      aws_api_gateway_integration.echo_server.id,
-    ]))
-  }
-
-  lifecycle {
-    create_before_destroy = true
+  endpoints {
+    apigateway     = "http://localhost:4566"
+    iam            = "http://localhost:4566"
+    lambda         = "http://localhost:4566"
+    cloudwatch     = "http://localhost:4566"
+    cloudwatchlogs = "http://localhost:4566"
   }
 }
 
-resource "aws_api_gateway_stage" "echo_server" {
-  deployment_id = aws_api_gateway_deployment.echo_server.id
-  rest_api_id   = aws_api_gateway_rest_api.echo_server.id
-  stage_name    = var.stage_name
+
+######################### API Gateway
+resource "aws_api_gateway_rest_api" "this" {
+  name = "prod_rest_api"
 }
 
-# Lambda
-resource "aws_lambda_permission" "api_gw" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.echo_server.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_api_gateway_rest_api.echo_server.execution_arn}/*/${aws_api_gateway_method.echo_server.http_method}${aws_api_gateway_resource.echo_server.path}"
+module "api_endpoint_echo_server" {
+  source                 = "./modules/api-gateway-endpoint"
+  resource_endpoint_name = "echo_server"
+  http_method            = "POST"
+  lambda_invoke_arn      = module.lambda.lambda_invoke_arn
+  rest_api = {
+    parent_id  = aws_api_gateway_rest_api.this.root_resource_id
+    id         = aws_api_gateway_rest_api.this.id
+    stage_name = var.environment
+  }
+}
+
+module "api_endpoint_echo_server2" {
+  source                 = "./modules/api-gateway-endpoint"
+  resource_endpoint_name = "echo_server2"
+  http_method            = "POST"
+  lambda_invoke_arn      = module.lambda.lambda_invoke_arn
+  rest_api = {
+    parent_id  = aws_api_gateway_rest_api.this.root_resource_id
+    id         = aws_api_gateway_rest_api.this.id
+    stage_name = var.environment
+  }
+}
+
+######################### Lambda function
+data "archive_file" "lambda_echo_server" {
+  type = "zip"
+
+  source_dir  = "${path.module}/echo-server"
+  output_path = "${path.module}/lambda_function_payload.zip"
 }
 
 resource "aws_iam_role" "lambda" {
@@ -106,24 +83,28 @@ resource "aws_iam_role" "lambda" {
 EOF
 }
 
-resource "aws_iam_role_policy_attachment" "lambda" {
-  role       = aws_iam_role.lambda.id
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
+module "lambda" {
+  source = "./modules/lambda"
 
-data "archive_file" "lambda_echo_server" {
-  type = "zip"
-
-  source_dir  = "${path.module}/echo-server"
-  output_path = "${path.module}/lambda_function_payload.zip"
-}
-
-resource "aws_lambda_function" "echo_server" {
-  filename         = "lambda_function_payload.zip"
   function_name    = "lambda_echo_server"
-  role             = aws_iam_role.lambda.arn
-  handler          = "index.handler"
+  filename         = data.archive_file.lambda_echo_server.output_path
   source_code_hash = data.archive_file.lambda_echo_server.output_base64sha256
+  source_arn       = "${aws_api_gateway_rest_api.this.execution_arn}/*/${module.api_endpoint_echo_server.http_method}${module.api_endpoint_echo_server.path}"
+  iam_role = {
+    id  = aws_iam_role.lambda.id
+    arn = aws_iam_role.lambda.arn
+  }
+}
 
-  runtime = "nodejs14.x"
+module "lambda2" {
+  source = "./modules/lambda"
+
+  function_name    = "lambda_echo_server2"
+  filename         = data.archive_file.lambda_echo_server.output_path
+  source_code_hash = data.archive_file.lambda_echo_server.output_base64sha256
+  source_arn       = "${aws_api_gateway_rest_api.this.execution_arn}/*/${module.api_endpoint_echo_server2.http_method}${module.api_endpoint_echo_server2.path}"
+  iam_role = {
+    id  = aws_iam_role.lambda.id
+    arn = aws_iam_role.lambda.arn
+  }
 }
