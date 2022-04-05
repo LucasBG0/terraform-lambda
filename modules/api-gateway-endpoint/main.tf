@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "4.8.0"
+    }
+  }
+}
+
 resource "aws_api_gateway_resource" "this" {
   path_part   = var.resource_endpoint_name
   parent_id   = var.rest_api.parent_id

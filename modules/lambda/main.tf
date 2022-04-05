@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "4.8.0"
+    }
+  }
+}
+
 resource "aws_lambda_function" "echo_server" {
   filename         = var.filename
   function_name    = var.function_name
